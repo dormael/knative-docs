@@ -1,86 +1,87 @@
 #!/bin/bash
 
-## sudo apt install ruby-dev
-## sudo gem install gimli
-
-BUILDDIR="_build"
 CWD="`pwd`"
-FIDX=0
 
 declare -A CPMAP
+declare -a LQUEUE
 
-mkdir -p "${BUILDDIR}"
-rm -rf "${BUILDDIR}/*"
+function append_file() {
+	local FROMDIR="${1}"
+	local FROMFILE="${2}"
 
-function copy_file() {
-	FROMDIR="${1}"
-	FROMFILE="${2}"
-
-	F="${FROMDIR}/${FROMFILE}"
-	AF="`realpath ${F}`"
+	local F="${FROMDIR}/${FROMFILE}"
+	local AF="`realpath ${F}`"
 
 	if [ ${CPMAP["${AF}"]+_} ]; then
-		echo "-- Skip copy ${F}"
+		echo ">>>	Skip	${AF}"
 		return
 	fi
 
-	T="`file --mime-type ${F} | sed 's/:/\t/g' | cut -f 2 | sed 's/\//\t/g' | cut -f 1 | sed 's/^ *//;s/ *$//'`"
-
-	TODIR="${BUILDDIR}"
-	if [ "text" != "${T}" ]; then
-		TODIR="${BUILDDIR}/${FROMDIR}"
-	fi
-	
-	if [ ! -e "${TODIR}" ]; then
-		mkdir -p "${TODIR}"
-	fi
-
-	FPREFIX="`printf "%05d" ${FIDX}`"
-	TOFILE="${TODIR}/${FPREFIX}_${FROMFILE}"
+	local T="`file --mime-type ${F} | sed 's/:/\t/g' | cut -f 2 | sed 's/\//\t/g' | cut -f 1 | sed 's/^ *//;s/ *$//'`"
 
 	CPMAP["${AF}"]="${TOFILE}"
-	FIDX=$(( FIDX + 1 ))
 
-	echo "Copy ${F} >> ${TOFILE}"
-	cp "${F}" "${TOFILE}"
+	echo ">>>	Append	${AF}"
 }
 
 function recurse_copy() {
-	WD="${1}"
-	TOCFILE="${2}"
+	local -a SQUEUE
 
-	echo ">>>>>>>>> ${WD}"
+	local WD="${1}"
+	local AF="`realpath ${WD}`"
+	local TOCFILE="${2}"
 
-	pushd "${WD}" > /dev/null	
-	copy_file "." "${TOCFILE}"
+	echo ">>>	Scan	${AF}	${TOCFILE}"
 
-	cat "${TOCFILE}" | grep "\[*\]" | grep -v "(http" | sed 's/- //' | sed 's/\[//' | sed 's/\](/|/' | sed 's/)/|/' | while read -r l
+	#cat "${AF}/${TOCFILE}" | grep "\[*\]" | grep -v "(http" | sed 's/- //' | sed 's/\[//' | sed 's/\](/|/' | sed 's/)/|/' | while read -r l
+	local SFILES=( `cat "${AF}/${TOCFILE}" | grep "\[*\]" | grep -v "(http" | sed 's/- //' | sed 's/\[//' | sed 's/\](/|/' | sed 's/)/|/'` )
+	echo ">>>	SFILES ${SFILES[@]}"
+	return
+
+	for l in ${SFILES[@]}
 	do
 		IFS='|'
-		LN=(${l})
+		local LN=(${l})
 		unset IFS
-		F="${LN[1]}"
-		TITLE=${LN[0]}
+		local F="${LN[1]}"
+		local TITLE=${LN[0]}
 
-		if [ ! -e "${F}" ]; then
-			echo ">> File ${F} is missing[${3}]"
+		echo ">>>	LN	${LN[@]}"
+
+		if [ ! -e "${AF}/${F}" ]; then
+			echo ">>>	Missing	${AF}/${F}" 
 			continue
 		fi
 
-		B="`basename ${F}`"
-		D="`dirname ${F}`"
-		if [ ! -d "${F}" ]; then
-			copy_file "${D}" "${B}"
-			continue
+		if [ -d "${AF}/${F}" ]; then
+			SQUEUE+=("${F}")
+		else
+			local B="`basename ${F}`"
+			local D="`dirname ${F}`"
+			if [ "${AF}" = "`realpath ${D}`" ]; then
+				append_file "${AF}/${D}" "${B}"
+			else
+				SQUEUE+=("${F}")
+			fi
 		fi
-
-		SF=( `\ls ${F}/*.md 2> /dev/null` )
-		if [ ${#SF[@]} -gt 0 ] && [ -e "${F}/README.md" ]; then
-			recurse_copy "${F}" "README.md"
-		fi
-
 	done
-	popd > /dev/null
+
+	echo ">>>	SQUEUE	${SQUEUE[@]}"
+	for i in "${!SQUEUE[@]}"
+	do
+		local F="${SQUEUE[$i]}"
+		local B="`basename ${F}`"
+		local D="`dirname ${F}`"
+		if [ "${AF}" = "`realpath ${D}`" ]; then
+			local SF=( `\ls ${AF}/${F}/*.md 2> /dev/null` )
+			if [ ${#SF[@]} -gt 0 ] && [ -e "${AF}/${F}/README.md" ]; then
+				recurse_copy "${AF}/${F}" "README.md"
+			fi
+		else
+			LQUEUE+=("${AF}/${F}")
+		fi
+	done
+	echo ">>>	LQUEUE	${LQUEUE[@]}"
 }
 
-recurse_copy "." "TOC.md"
+recurse_copy "install" "README.md"
