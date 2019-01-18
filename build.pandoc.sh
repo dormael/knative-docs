@@ -2,7 +2,7 @@
 
 #sudo apt install texlive-xetex librsvg2-bin
 
-FILES=( `go run pkg/main/main.go | sed 's/\/home\/dormael\/go\/src\/github.com\/dormael\/knative-docs\///' | sed 's/LocalFile //' | sed 's/^TOC.md$/README.md/'` )
+FILES=( `go run pkg/main/main.go | sed 's/\/home\/dormael\/go\/src\/github.com\/dormael\/knative-docs\///' | grep -v "^Skip" | sed 's/LocalFile //' | sed 's/^TOC.md$/README.md/'` )
 
 RESOURCE_PATH=".:./install:./build:./serving:./eventing:./serving/samples/autoscale-go:./serving/samples/knative-routing-go"
 

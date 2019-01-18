@@ -11,26 +11,42 @@ import (
 	blackfriday "gopkg.in/russross/blackfriday.v2"
 )
 
-var globalProcessedMap = make(map[string]string, 0)
+type parseContext struct {
+	replaceMap         map[string]string
+	globalProcessedMap map[string]int
+	globalParseMap     map[string]int
+}
 
 func main() {
 	rdir, _ := os.Getwd()
 	replaceMap := make(map[string]string, 0)
 	replaceMap["https://github.com/knative/docs/blob/master"] = rdir
 
-	parse([]string{filepath.Join(".", "TOC.md")}, replaceMap)
+	files := []string{filepath.Join(".", "TOC.md")}
+	pc := &parseContext{replaceMap, make(map[string]int, 0), make(map[string]int, 0)}
+	pc.parse(files)
 }
 
-func parse(files []string, replaceMap map[string]string) {
+func (c *parseContext) parse(files []string) {
 	suspended := make([]string, 0)
 	for _, filename := range files {
-		dir, file := filepath.Split(filename)
+		abs, err := filepath.Abs(filename)
+		checkKey := filename
+		if err == nil {
+			checkKey = abs
+		}
+		if _, ok := c.globalParseMap[checkKey]; ok {
+			fmt.Println("Skip", checkKey)
+			continue
+		}
+		c.globalParseMap[checkKey] = 1
 
+		dir, file := filepath.Split(filename)
 		linkOrder, _ := collectLinks(dir, file)
-		localFileQueue, suspendDirQueue, suspendFileQueue := aggregateLinks(dir, linkOrder, replaceMap)
+		localFileQueue, suspendDirQueue, suspendFileQueue := c.aggregateLinks(dir, linkOrder)
 
 		for _, f := range localFileQueue {
-			globalProcessedMap[f] = "Done"
+			c.globalProcessedMap[f] = 1
 			fmt.Println("LocalFile", f)
 		}
 
@@ -61,13 +77,14 @@ func parse(files []string, replaceMap map[string]string) {
 
 	arranged := make([]string, 0)
 	for _, f := range suspended {
-		if _, ok := globalProcessedMap[f]; !ok {
-			arranged = append(arranged, f)
+		if _, ok := c.globalParseMap[f]; ok {
+			continue
 		}
+		arranged = append(arranged, f)
 	}
 
 	if len(arranged) > 0 {
-		parse(arranged, replaceMap)
+		c.parse(arranged)
 	}
 }
 
@@ -120,13 +137,13 @@ func collectLinks(dir, file string) ([]string, map[string]string) {
 	return linkOrder, linkMap
 }
 
-func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string) (localFileQueue, suspendDirQueue, suspendFileQueue []string) {
+func (c *parseContext) aggregateLinks(dir string, linkOrder []string) (localFileQueue, suspendDirQueue, suspendFileQueue []string) {
 	localFileQueue = make([]string, 0)
 	suspendDirQueue = make([]string, 0)
 	suspendFileQueue = make([]string, 0)
 
 	for _, k := range linkOrder {
-		for o, n := range replaceMap {
+		for o, n := range c.replaceMap {
 			if strings.HasPrefix(k, o) {
 				k = strings.Replace(k, o, n, 1)
 				break
@@ -154,13 +171,8 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 
 		abs := toAbs(dirfile)
 
-		d, f := filepath.Split(k)
-		if f == "" {
-			fmt.Println("Skip", dirfile)
-			continue
-		}
-
-		if _, ok := globalProcessedMap[abs]; ok {
+		if _, ok := c.globalProcessedMap[abs]; ok {
+			fmt.Println("Skip", abs)
 			continue
 		}
 
@@ -178,7 +190,9 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 			continue
 		}
 
-		if toAbs(d) == toAbs(dir) {
+		d, _ := filepath.Split(k)
+
+		if d == "" || toAbs(d) == toAbs(dir) {
 			localFileQueue = append(localFileQueue, abs)
 		} else {
 			suspendFileQueue = append(suspendFileQueue, abs)
