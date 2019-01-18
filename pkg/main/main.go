@@ -14,8 +14,9 @@ import (
 var globalProcessedMap = make(map[string]string, 0)
 
 func main() {
+	rdir, _ := os.Getwd()
 	replaceMap := make(map[string]string, 0)
-	replaceMap["https://github.com/knative/docs/blob/master"] = "../.."
+	replaceMap["https://github.com/knative/docs/blob/master"] = rdir
 
 	parse([]string{filepath.Join(".", "TOC.md")}, replaceMap)
 }
@@ -58,8 +59,15 @@ func parse(files []string, replaceMap map[string]string) {
 		}
 	}
 
-	if len(suspended) > 0 {
-		parse(suspended, replaceMap)
+	arranged := make([]string, 0)
+	for _, f := range suspended {
+		if _, ok := globalProcessedMap[f]; !ok {
+			arranged = append(arranged, f)
+		}
+	}
+
+	if len(arranged) > 0 {
+		parse(arranged, replaceMap)
 	}
 }
 
@@ -82,6 +90,7 @@ func collectLinks(dir, file string) ([]string, map[string]string) {
 	var lastDest string
 	node.Walk(func(n *blackfriday.Node, entering bool) blackfriday.WalkStatus {
 		t := n.Type
+		text := string(n.Literal)
 
 		if t == blackfriday.CodeBlock {
 			return blackfriday.SkipChildren
@@ -91,7 +100,6 @@ func collectLinks(dir, file string) ([]string, map[string]string) {
 			ld := n.LinkData
 			lastDest = string(ld.Destination)
 		} else if t == blackfriday.Text && lastDest != "" {
-			text := string(n.Literal)
 
 			_, ok := linkMap[lastDest]
 
@@ -129,7 +137,12 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 			continue
 		}
 
-		dirfile := filepath.Join(dir, k)
+		var dirfile string
+		if isAbs(k) {
+			dirfile = k
+		} else {
+			dirfile = filepath.Join(dir, k)
+		}
 
 		spl := strings.Split(dirfile, "#L")
 
@@ -139,10 +152,16 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 			}
 		}
 
-		abs, err := filepath.Abs(dirfile)
+		abs := toAbs(dirfile)
 
-		if err != nil {
-			panic(err)
+		d, f := filepath.Split(k)
+		if f == "" {
+			fmt.Println("Skip", dirfile)
+			continue
+		}
+
+		if _, ok := globalProcessedMap[abs]; ok {
+			continue
 		}
 
 		stat, err := os.Stat(abs)
@@ -159,17 +178,7 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 			continue
 		}
 
-		d, f := filepath.Split(k)
-		if f == "" {
-			fmt.Println("Skip", dirfile)
-			continue
-		}
-
-		if _, ok := globalProcessedMap[abs]; ok {
-			continue
-		}
-
-		if d == "" || d == "./" {
+		if toAbs(d) == toAbs(dir) {
 			localFileQueue = append(localFileQueue, abs)
 		} else {
 			suspendFileQueue = append(suspendFileQueue, abs)
@@ -177,4 +186,35 @@ func aggregateLinks(dir string, linkOrder []string, replaceMap map[string]string
 	}
 
 	return localFileQueue, suspendDirQueue, suspendFileQueue
+}
+
+func toAbs(dirfile string) string {
+	abs, err := filepath.Abs(dirfile)
+	if err != nil {
+		panic(err)
+	}
+	return abs
+}
+
+func isAbs(dirfile string) bool {
+	abs, err := filepath.Abs(dirfile)
+	if err != nil {
+		return false
+	}
+
+	return abs == dirfile
+}
+
+func chdir() string {
+	err := os.Chdir("../..")
+	if err != nil {
+		panic(err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	return wd
 }
